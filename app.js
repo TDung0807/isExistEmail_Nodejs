@@ -1,115 +1,8 @@
+// app.js
 const fs = require('fs');
 const csv = require('csv-parser');
 const fastCsv = require('fast-csv');
-const dns = require('dns');
-const net = require('net');
-
-async function verifyEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-        return 'invalid';
-    }
-
-    const domain = email.split('@')[1];
-
-    try {
-        const mxRecords = await new Promise((resolve, reject) => {
-            dns.resolveMx(domain, (err, addresses) => {
-                if (err) reject(err);
-                else resolve(addresses);
-            });
-        });
-
-        if (mxRecords.length === 0) {
-            return 'nonexistent';
-        }
-
-        mxRecords.sort((a, b) => a.priority - b.priority);
-
-        const connectToMx = async (mx, retries = 3) => {
-            return new Promise((resolve, reject) => {
-                const client = net.createConnection(25, mx.exchange);
-                let stage = 0;
-
-                client.on('error', (err) => {
-                    if (err.code === 'ETIMEOUT' && retries > 0) {
-                        console.log(`Retrying connection to ${mx.exchange}... (${retries} retries left)`);
-                        resolve(connectToMx(mx, retries - 1));
-                    } else {
-                        reject(err);
-                    }
-                });
-
-                client.on('data', (data) => {
-                    const response = data.toString();
-
-                    if (stage === 0 && response.startsWith('220')) {
-                        client.write(`HELO ${domain}\r\n`);
-                        stage++;
-                    } else if (stage === 1 && response.startsWith('250')) {
-                        client.write(`MAIL FROM:<verify@${domain}>\r\n`);
-                        stage++;
-                    } else if (stage === 2 && response.startsWith('250')) {
-                        client.write(`RCPT TO:<${email}>\r\n`);
-                        stage++;
-                    } else if (stage === 3) {
-                        if (response.startsWith('250')) {
-                            client.end();
-                            resolve('existent');
-                        } else if (response.startsWith('550') || response.includes('5.1.1')) {
-                            if (response.includes('5.7.1')) {
-                                client.end();
-                                resolve('undetified');
-                            } else {
-                                client.end();
-                                resolve('nonexistent');
-                            }
-                        }
-                    } else if (response.startsWith('220') || response.startsWith('250')) {
-                        if (stage === 0) {
-                            client.write(`HELO ${domain}\r\n`);
-                        } else if (stage === 1) {
-                            client.write(`MAIL FROM:<verify@${domain}>\r\n`);
-                        } else if (stage === 2) {
-                            client.write(`RCPT TO:<${email}\r\n`);
-                        }
-                    } else {
-                        if (response.includes('5.7.1')) {
-                            client.end();
-                            resolve('undetified');
-                        } else {
-                            client.end();
-                            resolve('nonexistent');
-                        }
-                    }
-                });
-
-                client.on('end', () => {
-                    if (stage !== 3) {
-                        resolve('nonexistent');
-                    }
-                });
-            });
-        };
-
-        for (const mx of mxRecords) {
-            try {
-                const result = await connectToMx(mx);
-                if (result === 'existent' || result === 'undetified') {
-                    return result;
-                }
-            } catch (err) {
-                console.error(`Error connecting to MX server ${mx.exchange}:`, err);
-            }
-        }
-
-        return 'nonexistent';
-
-    } catch (error) {
-        console.log('Error resolving MX records:', error);
-        return 'nonexistent';
-    }
-}
+const Verify = require('./Verify');
 
 async function processCsv(filePath) {
     const results = [];
@@ -130,27 +23,101 @@ async function processCsv(filePath) {
         .pipe(csv())
         .on('data', (data) => results.push(data))
         .on('end', async () => {
-            const emailVerificationPromises = results.map(async (row) => {
-                const email = row.email;
-                try {
-                    const result = await verifyEmail(email);
-                    if (result === 'existent') {
-                        validCsvStream.write({ email });
-                    } else if (result === 'nonexistent') {
-                        invalidCsvStream.write({ email });
-                    } else if (result === 'undetified') {
+            // Initial processing of emails
+            const processResults = async () => {
+                const emailVerificationPromises = results.map(async (row) => {
+                    const email = row.email;
+                    try {
+                        const result = await Verify.verifyEmail(email);
+                        if (result === 'existent') {
+                            validCsvStream.write({ email });
+                        } else if (result === 'nonexistent') {
+                            invalidCsvStream.write({ email });
+                        } else if (result === 'undetified') {
+                            undetifiedCsvStream.write({ email });
+                        }
+                    } catch (error) {
                         undetifiedCsvStream.write({ email });
                     }
-                } catch (error) {
-                    undetifiedCsvStream.write({ email });
+                });
+
+                await Promise.all(emailVerificationPromises);
+
+                validCsvStream.end();
+                invalidCsvStream.end();
+                undetifiedCsvStream.end();
+            };
+
+            await processResults();
+
+            // Retry undetermined emails
+            const retryUndeterminedEmails = async () => {
+                console.log("-------------------Start step 2-------------------")
+                const undetifiedFilePath = 'output/undetified.csv';
+                let previousCount = 0;
+                let currentCount = 0;
+
+                const countUndeterminedEmails = async () => {
+                    return new Promise((resolve, reject) => {
+                        let count = 0;
+                        fs.createReadStream(undetifiedFilePath)
+                            .pipe(csv())
+                            .on('data', () => count++)
+                            .on('end', () => resolve(count))
+                            .on('error', reject);
+                    });
+                };
+
+                while (true) {
+                    previousCount = await countUndeterminedEmails();
+
+                    if (previousCount < 3) {
+                        console.log('No more undetermined emails or fewer than 3 entries. Exiting retry process.');
+                        break;
+                    }
+
+                    const undetifiedEmails = [];
+
+                    await new Promise((resolve, reject) => {
+                        fs.createReadStream(undetifiedFilePath)
+                            .pipe(csv())
+                            .on('data', (data) => undetifiedEmails.push(data))
+                            .on('end', resolve)
+                            .on('error', reject);
+                    });
+
+                    const retryPromises = undetifiedEmails.map(async (row) => {
+                        const email = row.email;
+                        try {
+                            const result = await Verify.verifyEmail(email);
+                            const updatedResult = (result === 'existent') ? validCsvStream : (result === 'nonexistent') ? invalidCsvStream : undetifiedCsvStream;
+                            updatedResult.write({ email });
+                        } catch (error) {
+                            undetifiedStream.write({ email });
+                        }
+                    });
+
+                    await Promise.all(retryPromises);
+
+                    // Clear the undetermined file for the next iteration
+                    await new Promise((resolve, reject) => {
+                        fs.truncate(undetifiedFilePath, (err) => {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                    });
+
+                    currentCount = await countUndeterminedEmails();
+
+                    // Exit if the number of undetermined emails did not change enough
+                    if (Math.abs(previousCount - currentCount) < 3) {
+                        console.log('Difference in undetermined email count is less than 3. Exiting retry process.');
+                        break;
+                    }
                 }
-            });
+            };
 
-            await Promise.all(emailVerificationPromises);
-
-            validCsvStream.end();
-            invalidCsvStream.end();
-            undetifiedCsvStream.end();
+            await retryUndeterminedEmails();
         });
 }
 
