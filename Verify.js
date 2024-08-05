@@ -32,7 +32,6 @@ class Verify {
 
                     client.on('error', (err) => {
                         if (err.code === 'ETIMEOUT' && retries > 0) {
-                            console.log(`Retrying connection to ${mx.exchange}... (${retries} retries left)`);
                             resolve(connectToMx(mx, retries - 1));
                         } else {
                             reject(err);
@@ -98,14 +97,12 @@ class Verify {
                         return result;
                     }
                 } catch (err) {
-                    console.error(`Error connecting to MX server ${mx.exchange}:`, err);
                 }
             }
 
             return 'nonexistent';
 
         } catch (error) {
-            console.log('Error resolving MX records:', error);
             return 'nonexistent';
         }
     }
