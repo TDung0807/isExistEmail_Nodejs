@@ -26,13 +26,18 @@ async function verifyEmail(email) {
 
         mxRecords.sort((a, b) => a.priority - b.priority);
 
-        const connectToMx = (mx) => {
+        const connectToMx = async (mx, retries = 3) => {
             return new Promise((resolve, reject) => {
                 const client = net.createConnection(25, mx.exchange);
                 let stage = 0;
 
                 client.on('error', (err) => {
-                    reject(err);
+                    if (err.code === 'ETIMEOUT' && retries > 0) {
+                        console.log(`Retrying connection to ${mx.exchange}... (${retries} retries left)`);
+                        resolve(connectToMx(mx, retries - 1));
+                    } else {
+                        reject(err);
+                    }
                 });
 
                 client.on('data', (data) => {
@@ -94,6 +99,7 @@ async function verifyEmail(email) {
                     return result;
                 }
             } catch (err) {
+                console.error(`Error connecting to MX server ${mx.exchange}:`, err);
             }
         }
 
@@ -136,7 +142,6 @@ async function processCsv(filePath) {
                         undetifiedCsvStream.write({ email });
                     }
                 } catch (error) {
-                    console.error(`Error verifying email ${email}:`);
                     undetifiedCsvStream.write({ email });
                 }
             });
