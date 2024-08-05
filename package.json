@@ -1,0 +1,20 @@
+{
+    "name": "Email-Validator",
+    "version": "1.0.0",
+    "description": "",
+    "main": "app.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "Dung Nguyen",
+    "license": "ISC",
+    "dependencies": {
+        "csv-parser": "^3.0.0",
+        "deep-email-validator": "^0.1.21",
+        "dns": "^0.2.2",
+        "express": "^4.19.2",
+        "fast-csv": "^5.0.1",
+        "nodemailer": "^6.9.14"
+    }
+}
