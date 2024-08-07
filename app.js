@@ -25,7 +25,7 @@ async function processCsv(filePath) {
         .on('data', (data) => results.push(data))
         .on('end', async () => {
             try {
-                console.log('Processing results...');
+                console.log('Processing results...: '+filePath);
                 processResults();
                 console.log('End of initial processing.');
                 retryUndeterminedEmails();
@@ -44,13 +44,11 @@ async function processCsv(filePath) {
             try {
                 const result = await Verify.verifyEmail(email);
                 if (result === 'existent') {
-                    console.log("1")
                     validCsvStream.write({ email });
                 } else if (result === 'nonexistent') {
-                    console.log("2")
+
                     invalidCsvStream.write({ email });
                 } else if (result === 'undetified') {
-                    console.log("3")
                     undetifiedCsvStream.write({ email });
                 }
             } catch (error) {
@@ -134,5 +132,5 @@ async function processCsv(filePath) {
     }
 }
 
-const filePath = './content/clean.csv';
+const filePath = 'content/ALF_Total.csv';
 processCsv(filePath);

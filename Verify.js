@@ -54,11 +54,15 @@ class Verify {
                             if (response.startsWith('250')) {
                                 client.end();
                                 resolve('existent');
-                            } else if (response.startsWith('550') || response.includes('5.1.1')) {
-                                if (response.includes('5.7.1')) {
+                            } else if (response.startsWith('550') || response.startsWith('553')) {
+                                if (response.includes('5.7.1')||response.includes('5.7.2')||response.includes('5.5.1')||response.includes('452')
+                                    ||response.includes('Anti-Spoofing')||response.includes('unauthenticated')||response.includes('Service unavailable')
+                                    ||response.includes('rejected')||response.includes('not allowed')||response.includes('Client Policy')        ) {
                                     client.end();
                                     resolve('undetified');
-                                } else {
+                                }
+                                else {
+                                    console.log(response)
                                     client.end();
                                     resolve('nonexistent');
                                 }
@@ -72,7 +76,7 @@ class Verify {
                                 client.write(`RCPT TO:<${email}\r\n`);
                             }
                         } else {
-                            if (response.includes('5.7.1')) {
+                            if (response.includes('5.7.1')||response.includes('5.7.2')||response.includes('5.5.1')||response.includes('SPF check failed')) {
                                 client.end();
                                 resolve('undetified');
                             } else {
