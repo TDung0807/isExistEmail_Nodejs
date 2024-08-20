@@ -41,6 +41,7 @@ async function processCsv(filePath) {
     async function processResults() {
         const emailVerificationPromises = results.map(async (row) => {
             const email = row.email;
+            console.log(email)
             try {
                 const result = await Verify.verifyEmail(email);
                 if (result === 'existent') {
@@ -132,5 +133,5 @@ async function processCsv(filePath) {
     }
 }
 
-const filePath = 'content/ALF_Total.csv';
+const filePath = 'content/MDA.csv';
 processCsv(filePath);
